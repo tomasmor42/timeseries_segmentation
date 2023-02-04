@@ -18,6 +18,9 @@ from  statsmodels.tsa.arima.model import ARIMA
 
 SEGMENTATION_FILE_PATH = "classification.csv"
 
+
+# Parameters for choosing models
+
 croston_params = ['sba', 'original', 'sbj']
 
 params = {
@@ -43,6 +46,10 @@ MAE_PRED = {}
 
 
 def get_samples(classification_file):
+  """
+  Getting samples of 10 from the dataset for every segment of the classification.
+  The result is a dictionary with lists of the timeseries ids.
+  """
   segm = pd.read_csv(classification_file)
   TEST_SAMPLE = {}
   INSEASON_INTERMITTENT_IDS = segm.loc[segm['segment'] == 'INSEASON_INTERMITTENT']['name']
@@ -83,8 +90,12 @@ def get_samples(classification_file):
 TEST_SAMPLE = get_samples()
 
 def get_ts_by_id(df, _id):
+  """
+  Getting the timeseries from the dataset based in id.
+  """
   ts = df.loc[df['id'] == _id]
   ts_column_name = ts.index[0]
+  filter_col = [col for col in df if col.startswith('d_')]
   ts = ts[filter_col].T
   ts = ts.reset_index()
   ts["td"] = ts["index"].str.split('_').str[1].astype('float').astype('Int64')
@@ -98,6 +109,9 @@ def get_ts_by_id(df, _id):
   return ts
 
 def plot_all():
+    """
+    Function that plots all timeseries from the test sample.
+    """
     sns.set_style("darkgrid")
     pd.plotting.register_matplotlib_converters()
     sns.mpl.rc("figure", figsize=(25, 5))
@@ -109,6 +123,9 @@ def plot_all():
           plt.show()
 
 def identify_step(ts):
+  """
+  Getting a step of the timeseries.
+  """
   ts_ = ts.reset_index()
   diffs = pd.DataFrame(ts_['date']- ts_['date'].shift(1)).dropna()
   elem = diffs['date'][1]
@@ -117,6 +134,9 @@ def identify_step(ts):
   return elem
 
 def forecast_moving_average(ts, no_predictions):
+  """
+  Forecasting a timeseries using moving average with expanding window.
+  """
   start = ts.index[-1] + identify_step(ts)
   df_extra = pd.DataFrame([0] * no_predictions, columns=[ts.name],
                   index=pd.date_range(start, periods = no_predictions))
@@ -126,6 +146,9 @@ def forecast_moving_average(ts, no_predictions):
 
 
 def forecast_retired(ts, no_predictions):
+  """
+  Forecasring retired timeseries.
+  """
   start = ts.index[-1] + identify_step(ts)
   res = pd.DataFrame([0] * no_predictions, columns=[ts.name],
                   index=pd.date_range(start, periods = no_predictions))
@@ -133,6 +156,10 @@ def forecast_retired(ts, no_predictions):
 
 
 def get_best_es_model(ts, error_function=mae):
+  """
+  Running exponential smoothing models with different parameters that set in exp_smoothing_params dictionary 
+  and choosing the one that gives the smallest error according to error function.
+  """
   no_train = round(len(ts) * TRAIN_SIZE)
   train = ts[:no_train]
   test = ts[no_train:]
@@ -166,11 +193,17 @@ def get_best_es_model(ts, error_function=mae):
 
 
 def forecast_ses(ts, no_predictions):
+  """
+  Building a forecast with Simple Exponential smoothing model.
+  """
   model = SimpleExpSmoothing(ts, initialization_method="heuristic").fit()
   res = model.forecast(no_predictions)
   return res
 
 def forecast_es(ts, no_predictions):
+  """
+  Forecasting timeseries with Exponential Smoothing model defined in get_best_es_model function.
+  """
   shift_size = ts.min() + 1
 
   ts_shifted = ts + shift_size
@@ -187,12 +220,18 @@ def forecast_es(ts, no_predictions):
   return res
 
 def forecast_holt(ts, no_predictions):
+  """
+  Building a forecast with Holt model.
+  """
   model = Holt(ts, initialization_method="heuristic").fit()
   res = model.forecast(no_predictions)
   return res
 
 
 def forecast_croston(ts, no_predictions, error_function=mae):
+  """
+  Finding the best parameters and forecasting timeseries with Croston model.
+  """
   no_train = round(len(ts) * TRAIN_SIZE)
   train = ts[:no_train]
   test = ts[no_train:]
@@ -202,14 +241,16 @@ def forecast_croston(ts, no_predictions, error_function=mae):
     pred = croston.fit_croston(train, no_forecast, variant)
     if 'croston_forecast' in pred:
       pred = pred['croston_forecast']
-    errors[variant] = mae(pred, test)
+    errors[variant] = error_function(pred, test)
   param = max(errors, key=errors.get)
   fit_pred = croston.fit_croston(ts, no_predictions, param)
   return fit_pred['croston_forecast']
 
 
 def forecast_arima(ts, no_predictions, seasonality=False):
-  
+    """
+    Finding the best ARIMA model for predictions and forecast with it.
+    """
     model = auto_arima(
         ts, start_p=0, start_q=0, test='adf',
         max_p=3, max_q=3, m=1, d=1, start_P=0, start_Q=1, max_P=3, max_D=3, max_Q=3,
@@ -224,6 +265,18 @@ def get_segment(segment, ts_name):
 
 
 def forecast(ts_name, ts, no_predictions):
+  """
+  Building a forecast according to the time series classification type. The types are stored in SEGMENTATION_FILE_PATH
+  RETIRED: constant 0;
+  LOW_VOLUME Simple exponential smoothing;
+  INSEASON_INTERMITTENT Croston forecasting;
+  INSEASON_NON_INTERMITTENT ARIMA;
+  YEAR_ROUND_INTERMITTENT Croston forecasting;
+  YEAR_ROUND_SEASONAL Seasonal exponential smoothing;
+  YEAR_ROUND_NON_SEASONAL Exponential smoothing;
+  YEAR_ROUND_SEASONAL_INTERMITTENT Seasonal exponential smoothing;
+  YEAR_ROUND_OTHER Moving average.
+  """
   segment_file = pd.read_csv(SEGMENTATION_FILE_PATH)
   segment = get_segment(segment_file, ts_name)
   if segment == "RETIRED":
@@ -242,10 +295,13 @@ def forecast(ts_name, ts, no_predictions):
     return forecast_es(ts, no_predictions)
   if segment == "YEAR_ROUND_NOT_SEASONAL":
     return forecast_arima(ts, no_predictions)
-
+  return forecast_moving_average(ts, no_predictions)
 
 
 def predict_base(ts, no_predictions):
+  """
+  Building a baseline using Prophet.
+  """
   ts_df= pd.DataFrame(ts).reset_index()[['sale', 'date']]
   ts_df['ds'] = ts_df['date']
   ts_df['y'] = ts_df['sale']
@@ -257,6 +313,9 @@ def predict_base(ts, no_predictions):
 
 
 def get_mae_base_prophet(ts_name, no_predictions):
+  """
+  Calculating MAE for the Prophet baseling.
+  """
   ts = get_ts_by_id(ts_name)
   train = ts[:-no_predictions]
   test = ts[-no_predictions:]
@@ -266,6 +325,10 @@ def get_mae_base_prophet(ts_name, no_predictions):
 
 
 def get_baseline(test_sample):
+  """
+  Building a forecast for both baselines (Prophet and Simple exponential smoothing) and calculate the error.
+  The error dicstionaries are updated. 
+  """
   for ts_name in test_sample:
     ts = get_ts_by_id(ts_name)
     train = ts[:-28]
@@ -277,6 +340,9 @@ def get_baseline(test_sample):
     MAE_BASE[ts_name] = get_mae_base_prophet(ts_name, 28)
 
 def get_predictiions(test_sample):
+  """
+  Building a prediction for timeseries and calculating an error.
+  """
   for ts_name in test_sample:
     ts = get_ts_by_id(ts_name)
     train = ts[:-28]
@@ -289,6 +355,11 @@ def get_predictiions(test_sample):
 
 
 def err_diff(test_sample, segment=None):
+  """
+  Calculating the difference between errors in forecasting using baseline and segmentation pipeline. 
+  First element of the returned tuple is the difference between MAE of segmentation pipeline and Prophet forecasting. 
+  Second element of the returned tuple is the difference between MAE of segmentation pipeline and simple exponential smoothing. 
+  """
   p = 0
   es = 0
   if not segment:

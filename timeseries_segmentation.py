@@ -108,21 +108,21 @@ def get_min_demand_interval_length(non_zero_indexes):
 
 def is_retired(ts, seasonality, demand_span="YEAR_ROUND"):
   """
-This attribute classifies the time series as either no longer active (Y) or still active (N). To determine if a time series is retired, the following calculations are performed. Missing values are not treated as zero unless Missing interpretation is set to 0 for the dependent variable.
-The number of trimmed observations is determined by removing the missing observations.
-The retired threshold is defined as max(1, floor(seasonality/26)).
-The active demand period is determine by removing all leading and trailing zero values from the time series.
-The nonzero_demand{} array stores all of the nonzero observations within the active demand period.
-The demand_interval{} array stores all demand intervals in active demand periods.
-The demand_cycle_length{} array stores the length of each set of consecutive non-zero values within the active demand period.
-The gap_interval_length{} array stores the length of each set of consecutive zero values within the active demand period.
-The time series is retired if both of these conditions are true:
-(number of trimmed observations + length of trailing zeros) > (seasonality + retired threshold)
-Any one of the following conditions is true:
-Length of trailing zeros > (seasonality + retired threshold)
-Length of trailing zeros > MAX(gap_interval_length{}) + retired threshold
-If the DEMAND_SPAN attribute is YEAR_ROUND, then the length of trailing zeros > MAX(demand_interval{}) + retired threshold
-If the DEMAND_SPAN attribute is INSEASON, then MIN(demand_cycle_length{}) + length of trailing zeros > (seasonality + retired threshold)
+  This attribute classifies the time series as either no longer active (Y) or still active (N). To determine if a time series is retired, the following calculations are performed. Missing values are not treated as zero unless Missing interpretation is set to 0 for the dependent variable.
+  The number of trimmed observations is determined by removing the missing observations.
+  The retired threshold is defined as max(1, floor(seasonality/26)).
+  The active demand period is determine by removing all leading and trailing zero values from the time series.
+  The nonzero_demand{} array stores all of the nonzero observations within the active demand period.
+  The demand_interval{} array stores all demand intervals in active demand periods.
+  The demand_cycle_length{} array stores the length of each set of consecutive non-zero values within the active demand period.
+  The gap_interval_length{} array stores the length of each set of consecutive zero values within the active demand period.
+  The time series is retired if both of these conditions are true:
+  (number of trimmed observations + length of trailing zeros) > (seasonality + retired threshold)
+  Any one of the following conditions is true:
+  Length of trailing zeros > (seasonality + retired threshold)
+  Length of trailing zeros > MAX(gap_interval_length{}) + retired threshold
+  If the DEMAND_SPAN attribute is YEAR_ROUND, then the length of trailing zeros > MAX(demand_interval{}) + retired threshold
+  If the DEMAND_SPAN attribute is INSEASON, then MIN(demand_cycle_length{}) + length of trailing zeros > (seasonality + retired threshold)
 """
 
   no_nas = np.count_nonzero(np.isnan(ts))
@@ -149,6 +149,9 @@ If the DEMAND_SPAN attribute is INSEASON, then MIN(demand_cycle_length{}) + leng
 
 
 def is_intermitent_seasonal(ts, seasonality=1):
+  """
+  Calculating intermittency based on the seasonality.
+  """
   fill_na_ts = np.where(np.isnan(ts), 0, ts)
   bool_ts = fill_na_ts == 0
   ts_adj = np.ediff1d(bool_ts.astype(int))
@@ -157,6 +160,9 @@ def is_intermitent_seasonal(ts, seasonality=1):
   return p <= P_VALUE
 
 def get_low_volume_value(df):
+  """
+  Calculating the treshold of the low volume time series assuming it's the 10% of the lowest volumes.
+  """
   vol_series = []
   ids = df['id'].unique()
   for i in ids:
@@ -166,12 +172,19 @@ def get_low_volume_value(df):
   return vol_series.quantile(q=0.1)
 
 def get_volume(ts, low_volume_value):
-
+  """
+  Timeseries considered to have a low volume if the total sum of non-zero values is lower than a treshold.
+  """
   if sum(ts) < low_volume_value:
     return 'LOW'
 
 
 def get_volatility(ts, period=1):
+  """
+  Measurement for measuring volatility starts with these two measures.
+  the mean absolute error (MAE) from the exponential smoothing model (ESM)
+  the irregular component from the seasonal decomposition.
+  """
   train_size = math.floor(len(ts) * 0.7)
   train_ts = ts[:train_size]
   test_ts = ts[train_size:]
@@ -179,9 +192,7 @@ def get_volatility(ts, period=1):
   fit = model.fit()
   pred = fit.forecast(len(ts) - train_size)
   mae = mean_absolute_error(test_ts, pred)
-  mape = mean_absolute_percentage_error(test_ts, pred)
   residual = seasonal_decompose(np.array(ts), model='additive', period=period).resid
-  
   return np.median((mae, np.median(residual)))
 
 def count_demand_spans(ts):
@@ -233,6 +244,9 @@ Any remaining time series are classified as ND.
 
 
 def find_seasonality(signal):
+    """
+    Finding a seasonality for a timeseries based on autocorrelation function.
+    """
     acf = np.correlate(signal, signal, 'full')[-len(signal):]
     inflection = np.diff(np.sign(np.diff(acf)))
     peaks = (inflection < 0).nonzero()[0] + 1
@@ -267,49 +281,40 @@ def is_seasonal(ts, seasonality):
 
 
 def classify_time_series(ts):
-  """SHORT
-Time series with a short record of historical data. This could be a new series with only a few observations. The Naive (Moving Average) Forecasting pipeline is selected for this segment. Moving average is already selected as the naive model type.
+  """
+  SHORT
+  Time series with a short record of historical data. This could be a new series with only a few observations. The Naive (Moving Average) Forecasting pipeline is selected for this segment. Moving average is already selected as the naive model type.
 
-LOW_VOLUME
+  LOW_VOLUME
+  Time series with low volumes. The Naive Forecasting pipeline is selected for this segment. Seasonal random walk is already selected as the naive model type.
 
-Time series with low volumes. The Naive Forecasting pipeline is selected for this segment. Seasonal random walk is already selected as the naive model type.
+  INSEASON_INTERMITTENT
+  Short time span series with intermittent patterns. The Regression Forecasting pipeline is selected for this segment.
 
-INSEASON_INTERMITTENT
+  INSEASON_NON_INTERMITTENT
+  Short time span series without intermittent patterns. The Regression Forecasting pipeline is selected for this segment.
 
-Short time span series with intermittent patterns. The Regression Forecasting pipeline is selected for this segment.
+  YEAR_ROUND_INTERMITTENT
+  Long time span series with intermittent patterns. The Auto-forecasting model (Intermittent) pipeline is selected for this segment. Only the IDM model is selected for inclusion.
 
-INSEASON_NON_INTERMITTENT
+  YEAR_ROUND_SEASONAL
+  Long time span series with seasonal patterns. The Seasonal Forecasting pipeline is selected for this segment.
 
-Short time span series without intermittent patterns. The Regression Forecasting pipeline is selected for this segment.
+  YEAR_ROUND_NON_SEASONAL
+  Long time span series without seasonal patterns. The Non-seasonal Forecasting pipeline is selected for this segment.
 
-YEAR_ROUND_INTERMITTENT
+  YEAR_ROUND_SEASONAL_INTERMITTENT
+  Long time span series with seasonal and intermittent patterns. The Temporal Aggregation Forecasting pipeline is selected for this segment. Moving average is already selected as the naive model type.
 
-Long time span series with intermittent patterns. The Auto-forecasting model (Intermittent) pipeline is selected for this segment. Only the IDM model is selected for inclusion.
+  YEAR_ROUND_OTHER
+  Long time span series with no patterns that can be classified. The Naive (Moving Average) Forecasting pipeline is selected for this segment. Moving average is already selected as the naive model type.
 
-YEAR_ROUND_SEASONAL
+  OTHER
+  Time series that do not span long time periods and cannot be classified. The Naive (Moving Average) Forecasting pipeline is selected for this segment. Moving average is already selected as the naive model type.
 
-Long time span series with seasonal patterns. The Seasonal Forecasting pipeline is selected for this segment.
-
-YEAR_ROUND_NON_SEASONAL
-
-Long time span series without seasonal patterns. The Non-seasonal Forecasting pipeline is selected for this segment.
-
-YEAR_ROUND_SEASONAL_INTERMITTENT
-
-Long time span series with seasonal and intermittent patterns. The Temporal Aggregation Forecasting pipeline is selected for this segment. Moving average is already selected as the naive model type.
-
-YEAR_ROUND_OTHER
-
-Long time span series with no patterns that can be classified. The Naive (Moving Average) Forecasting pipeline is selected for this segment. Moving average is already selected as the naive model type.
-
-OTHER
-
-Time series that do not span long time periods and cannot be classified. The Naive (Moving Average) Forecasting pipeline is selected for this segment. Moving average is already selected as the naive model type.
-
-RETIRED
-
-Time series that are retired or are no longer active. The Retired Series model is selected for this segment.
-"""
+  RETIRED
+  Time series that are retired or are no longer active. The Retired Series model is selected for this segment.
+  """
   seasonality = find_seasonality(ts)
   
   demand_span = get_demand_span(ts, seasonality=seasonality)
@@ -346,6 +351,9 @@ Time series that are retired or are no longer active. The Retired Series model i
 
 
 def build_caledar_dummies(calendar_file_name):
+  """
+  As an input this function uses the csv with calendar features. It has information about the day of week. 
+  """
   calendar = pd.read_csv(calendar_file_name)
   week_days = calendar[["date", "weekday"]]
   week_days['date'] = pd.to_datetime(week_days['date'], format='%Y-%m-%d')
@@ -354,9 +362,13 @@ def build_caledar_dummies(calendar_file_name):
   return week_days_dummies
 
 
-def get_ts_by_id(_id):
+def get_ts_by_id(df, _id):
+  """
+  Reading and preparing the timeseries from the dataset from id.
+  """
   ts = df.loc[df['id'] == _id]
   ts_column_name = ts.index[0]
+  filter_col = [col for col in df if col.startswith('d_')]
   ts = ts[filter_col].T
   ts = ts.reset_index()
   ts["td"] = ts["index"].str.split('_').str[1].astype('float').astype('Int64')
@@ -364,40 +376,45 @@ def get_ts_by_id(_id):
   
   ts = ts.set_index('date')
   ts['sale'] = ts[ts_column_name]
-  ts = ts.drop(index="NaT")
+  ts = ts.drop(index="NaT", errors="ignore")
 
   ts = ts['sale'].astype(int)
   return ts
 
 
-
-def read_ts(df):
-  
-  ids = df['id'].unique()
-  filter_col = [col for col in df if col.startswith('d_')]
-  for _id in ids:
+def classify_timeseries(ts):
+    """
+    Getting the classifications for the timeseries and storing the result in the resulting dictionary.
+    If the timeseries couldn't be classified, it is stored as NA
+    """
     try:
-      if _id in RES:
-        continue
-      ts = df.loc[df['id'] == _id]
-      ts_column_name = ts.index[0]
-      ts = ts[filter_col].T
-      ts = ts.reset_index()
-      ts["td"] = ts["index"].str.split('_').str[1].astype('float').astype('Int64')
-      ts["date"] = datetime(2011, 1, 28) + pd.TimedeltaIndex(ts['td'], unit='D')
-      
-      ts = ts.set_index('date')
-      ts['sale'] = ts[ts_column_name]
-
-      ts = ts['sale'].astype(int)
-      ts_type = classify_time_series(ts)
+        ts_type = classify_time_series(ts)
     except Exception as exc:
       print(exc)
       ts_type = "NA"
-    RES[_id] = ts_type
+    RES[ts.name] = ts_type
+
+
+def classify_all_timeseries(df):
+    """
+    Runs classification on all time series from the dataframe.
+    """
+    ids = df['id'].unique()
+    for _id in ids:
+      try:
+        ts = get_ts_by_id(df, _id)
+        ts_type = classify_time_series(ts)
+      except Exception as exc:
+        print(exc)
+        ts_type = "NA"
+      RES[_id] = ts_type
 
 
 def count_result_values(res):
+    """
+    Counting values in the final dictionary to see the classes
+    distribution.
+    """
 
     count_dict = {}
 
