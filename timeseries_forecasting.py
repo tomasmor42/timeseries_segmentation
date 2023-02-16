@@ -370,3 +370,108 @@ def err_diff(test_sample, segment=None):
     p += MAE_PRED[elem] - MAE_BASE[elem]
     es += MAE_PRED[elem] - MAE_ES[elem]
   return p, es
+
+def forecast_es_yr_seasonal(ts, no_predictions):
+  shift_size = ts.min() + 1
+
+  ts_shifted = ts + shift_size
+  model = ExponentialSmoothing(
+    ts_shifted,
+    seasonal_periods=7,
+
+    use_boxcox=True,
+    initialization_method="estimated",
+).fit(smoothing_level=0.4)
+  res = model.forecast(no_predictions)
+  res = res.fillna(0)
+  res = res - shift_size
+  return res
+
+
+def forecast_es_yr_seasonal_intermittent(ts, no_predictions):
+  shift_size = ts.min() + 1
+
+  ts_shifted = ts + shift_size
+  model = ExponentialSmoothing(
+    ts_shifted,
+    seasonal_periods=7,
+
+    use_boxcox=True,
+    initialization_method="estimated",
+).fit(smoothing_level=0.05)
+  res = model.forecast(no_predictions)
+  res = res.fillna(0)
+  res = res - shift_size
+  return res
+
+
+def forecast_es_intermittent(ts, no_predictions):
+  shift_size = ts.min() + 1
+
+  ts_shifted = ts + shift_size
+  model = ExponentialSmoothing(
+    ts_shifted,
+    seasonal_periods=12,
+
+    use_boxcox=True,
+    initialization_method="estimated",
+).fit(smoothing_level=0.05)
+  res = model.forecast(no_predictions)
+  res = res.fillna(0)
+  res = res - shift_size
+  return res
+
+
+def forecast_es_yr_not_seasonal(ts, no_predictions):
+  shift_size = ts.min() + 1
+
+  ts_shifted = ts + shift_size
+  model = ExponentialSmoothing(
+    ts_shifted,
+
+    use_boxcox=False,
+    initialization_method="estimated",
+).fit(smoothing_level=0.15)
+  res = model.forecast(no_predictions)
+  res = res.fillna(0)
+  res = res - shift_size
+  return res
+
+
+def forecast_es_non_intermittent(ts, no_predictions):
+  shift_size = ts.min() + 1
+
+  ts_shifted = ts + shift_size
+  model = ExponentialSmoothing(
+    ts_shifted,
+    seasonal_periods=12,
+
+    initialization_method="heuristic",
+).fit(smoothing_level=0.2)
+  res = model.forecast(no_predictions)
+  res = res.fillna(0)
+  res = res - shift_size
+  return res
+
+
+def forecast_es_pipeline(ts_name, ts, no_predictions):
+  """
+  Building a pipeline for forecasting based on Exponential Smoothing models
+  """
+  segment = get_segment(ts_name)
+  if segment == "RETIRED":
+    return forecast_retired(ts, no_predictions)
+  if segment == "LOW_VOLUME":
+    return forecast_ses(ts, no_predictions)
+  if segment == "INSEASON_INTERMITTENT":
+    return forecast_es_intermittent(ts, no_predictions)
+  if segment == "INSEASON_NON_INTERMITTENT":
+    return forecast_es_non_intermittent(ts, no_predictions)
+  if segment == "YEAR_ROUND_INTERMITTENT":
+    return forecast_es_intermittent(ts, no_predictions)
+  if segment == "YEAR_ROUND_SEASONAL":
+    return forecast_es_yr_seasonal(ts, no_predictions)
+  if segment == "YEAR_ROUND_SEASONAL_INTERMITTENT":
+    return forecast_es_yr_seasonal_intermittent(ts, no_predictions)
+  if segment == "YEAR_ROUND_NOT_SEASONAL":
+    return forecast_es_yr_not_seasonal(ts, no_predictions)
